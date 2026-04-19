@@ -4,7 +4,7 @@ MicroPython driver and demo code for Feetech **STS3215** serial bus servos,
 targeted at the Raspberry Pi Pico (RP2040).
 
 Companion code for the YouTube video
-*"Bus Servos are SO Much Better — Here's Why (STS3215 + Pico)"*.
+*"Why are Bus Servos Better?"*.
 
 ## Files
 
