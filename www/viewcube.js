@@ -1,28 +1,52 @@
 // View-cube widget: small cube in the top-right of the 3D viewer with
-// labeled faces. Clicking a face / edge / corner animates the main
-// camera to view the arm from that direction. A home button next to it
-// resets to the default camera position.
+// labeled faces, hover highlighting per zone, and a home button.
 //
-// Implementation: one BoxGeometry rendered in its own scene + camera +
-// canvas overlaid on the parent. Face labels are CanvasTextures applied
-// to each face individually. The widget's camera mirrors the main
-// camera's direction so the cube always shows the face the user is
-// currently looking at toward the screen.
+// The cube is built from 26 subcubes laid out in a 3×3×3 grid (the
+// centre subcube is omitted). Each subcube represents one face / edge /
+// corner zone — six faces (one non-zero axis), twelve edges (two
+// non-zero axes), eight corners (three non-zero axes). Per-cell meshes
+// give us:
+//   * pixel-accurate hover highlighting (just tint that cell's material);
+//   * unambiguous click direction (the cell's (i, j, k) IS the camera
+//     direction the user wants to fly to).
+//
+// The widget's camera mirrors the main camera's direction so the face
+// currently aimed at the user is always shown forward.
 "use strict";
 
 import * as THREE from "three";
 
-const SIZE_PX = 96;       // cube widget canvas size
-const HOME_SIZE_PX = 32;  // home button size
+const SIZE_PX = 96;
 const ANIMATE_MS = 380;
-const ZONE_THRESHOLD = 0.34;  // |coord| above this counts as "near edge"
 
-// BoxGeometry material order is [+x, -x, +y, -y, +z, -z].
-// Labels are chosen so the cube's frame matches the arm's frame:
+const CELL = 1 / 3;       // each subcube is 1/3 of the cube side
+const STEP = CELL;        // no gap — adjacent cells touch
+const OUTER = CELL * 1.5; // half cube extent
+
+// Light-theme colours per zone, with a single hover tint on top.
+const COLOR_FACE   = 0xffffff;
+const COLOR_EDGE   = 0xeaeef5;
+const COLOR_CORNER = 0xd9dfe9;
+const COLOR_HOVER  = 0xffd86b;
+const COLOR_OUTLINE = 0xb6bdc9;
+const COLOR_CELL_OUTLINE = 0xc8cdd6;
+
+// BoxGeometry material order: [+x, -x, +y, -y, +z, -z].
+function faceIndexFor(axis, sign) {
+  if (axis === "x") return sign > 0 ? 0 : 1;
+  if (axis === "y") return sign > 0 ? 2 : 3;
+  return sign > 0 ? 4 : 5;
+}
+
+// Cube faces are labelled to match the arm's frame:
 //   robot +x = world +x → "front"
 //   robot +z = world +y → "top"
 //   robot -y = world +z → "right"
-const FACE_LABELS = ["front", "rear", "top", "bottom", "right", "left"];
+const FACE_LABELS = {
+  "x+": "front", "x-": "rear",
+  "y+": "top",   "y-": "bottom",
+  "z+": "right", "z-": "left",
+};
 
 const HOME_ICON_SVG = `
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -37,16 +61,15 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
   container.className = "view-cube-container";
   mountEl.appendChild(container);
 
-  // --- Cube renderer ------------------------------------------------------
   const cubeRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
   cubeRenderer.setPixelRatio(window.devicePixelRatio || 1);
   cubeRenderer.setSize(SIZE_PX, SIZE_PX, false);
   const cubeEl = cubeRenderer.domElement;
   cubeEl.classList.add("view-cube-canvas");
-  cubeEl.setAttribute("title", "click a face / edge / corner to align the view");
+  cubeEl.setAttribute("title",
+    "click a face / edge / corner to align the view");
   container.appendChild(cubeEl);
 
-  // --- Home button --------------------------------------------------------
   const homeBtn = document.createElement("button");
   homeBtn.type = "button";
   homeBtn.className = "view-cube-home";
@@ -55,9 +78,9 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
   homeBtn.innerHTML = HOME_ICON_SVG;
   container.appendChild(homeBtn);
 
-  // --- Cube scene ---------------------------------------------------------
-  const cubeScene = new THREE.Scene();
+  // --- Scene + camera ----------------------------------------------------
 
+  const cubeScene = new THREE.Scene();
   const cubeCam = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
   cubeCam.position.set(0, 0, 4);
   cubeCam.lookAt(0, 0, 0);
@@ -67,55 +90,123 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
   cubeKey.position.set(2, 3, 4);
   cubeScene.add(cubeKey);
 
-  const faceMaterials = FACE_LABELS.map((label) =>
-    new THREE.MeshBasicMaterial({ map: makeFaceTexture(label) }));
-  const cubeMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    faceMaterials,
-  );
-  cubeScene.add(cubeMesh);
+  // --- Build the 26 subcube cells ----------------------------------------
 
-  // Edge outline so the cube reads as a 3D shape on a light background.
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(cubeMesh.geometry),
-    new THREE.LineBasicMaterial({ color: 0xb6bdc9 }),
-  );
-  cubeMesh.add(edges);
+  const cells = [];                  // pickable meshes
+  const labelTextureCache = {};
 
-  // --- Picking ------------------------------------------------------------
+  for (let i = -1; i <= 1; i++) {
+    for (let j = -1; j <= 1; j++) {
+      for (let k = -1; k <= 1; k++) {
+        if (i === 0 && j === 0 && k === 0) continue;
+        const type = Math.abs(i) + Math.abs(j) + Math.abs(k);
+        const baseColor =
+          type === 1 ? COLOR_FACE :
+          type === 2 ? COLOR_EDGE :
+                       COLOR_CORNER;
+
+        const materials = [0, 1, 2, 3, 4, 5].map(() =>
+          new THREE.MeshBasicMaterial({ color: baseColor }));
+
+        // Apply label textures only to face cells, on the outward face.
+        if (type === 1) {
+          const axis = i !== 0 ? "x" : (j !== 0 ? "y" : "z");
+          const sign = (axis === "x" ? i : axis === "y" ? j : k);
+          const key = axis + (sign > 0 ? "+" : "-");
+          const label = FACE_LABELS[key];
+          const tex = (labelTextureCache[label]
+                    ||= makeFaceTexture(label));
+          const idx = faceIndexFor(axis, sign);
+          materials[idx] = new THREE.MeshBasicMaterial({
+            map: tex, color: baseColor,
+          });
+        }
+
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(CELL, CELL, CELL),
+          materials,
+        );
+        mesh.position.set(i * STEP, j * STEP, k * STEP);
+        mesh.userData.direction = new THREE.Vector3(i, j, k);
+        mesh.userData.baseColor = baseColor;
+        mesh.userData.materials = materials;
+
+        // Per-cell wireframe so the user can tell where each zone is even
+        // before they hover. Slightly darker than the cells so it reads
+        // against the white face background.
+        const wires = new THREE.LineSegments(
+          new THREE.EdgesGeometry(mesh.geometry),
+          new THREE.LineBasicMaterial({ color: COLOR_CELL_OUTLINE }),
+        );
+        mesh.add(wires);
+
+        cubeScene.add(mesh);
+        cells.push(mesh);
+      }
+    }
+  }
+
+  // Crisp outline around the whole cube.
+  const outline = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(1.001, 1.001, 1.001)),
+    new THREE.LineBasicMaterial({ color: COLOR_OUTLINE }),
+  );
+  cubeScene.add(outline);
+
+  // --- Picking + hover ---------------------------------------------------
+
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
+  let hovered = null;
   let animating = false;
 
-  cubeEl.addEventListener("pointerdown", (ev) => {
-    if (animating) return;
+  function tintCell(cell, hex) {
+    for (const m of cell.userData.materials) m.color.setHex(hex);
+  }
+  function setHover(cell) {
+    if (cell === hovered) return;
+    if (hovered) tintCell(hovered, hovered.userData.baseColor);
+    if (cell)    tintCell(cell, COLOR_HOVER);
+    hovered = cell;
+    cubeEl.style.cursor = cell ? "pointer" : "default";
+  }
+  function pickAt(ev) {
     const r = cubeEl.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) return;
+    if (r.width === 0 || r.height === 0) return null;
     ndc.x =  ((ev.clientX - r.left) / r.width)  * 2 - 1;
     ndc.y = -((ev.clientY - r.top)  / r.height) * 2 + 1;
     raycaster.setFromCamera(ndc, cubeCam);
-    const hits = raycaster.intersectObject(cubeMesh, false);
-    if (hits.length === 0) return;
-    const local = cubeMesh.worldToLocal(hits[0].point.clone());
-    const dir = directionFromLocalHit(local);
-    if (dir.lengthSq() === 0) return;
-    animateCameraTo(dir);
+    const hits = raycaster.intersectObjects(cells, false);
+    return hits.length > 0 ? hits[0].object : null;
+  }
+
+  cubeEl.addEventListener("pointermove", (ev) => {
+    setHover(pickAt(ev));
+  });
+  cubeEl.addEventListener("pointerleave", () => setHover(null));
+  cubeEl.addEventListener("pointerdown", (ev) => {
+    if (animating) return;
+    const cell = pickAt(ev);
+    if (!cell) return;
+    animateCameraTo(cell.userData.direction);
   });
 
   homeBtn.addEventListener("click", () => {
     if (animating) return;
-    animateCameraTo(null);  // null → snap to homeView
+    animateCameraTo(null);
   });
 
-  // --- Animation ----------------------------------------------------------
+  // --- Animation ---------------------------------------------------------
 
   function animateCameraTo(direction) {
     animating = true;
+    setHover(null);
     mainControls.enabled = false;
 
     const target = mainControls.target.clone();
     const fromPos = mainCamera.position.clone();
     const fromUp = mainCamera.up.clone();
+    const fromTarget = target.clone();
 
     let toPos, toUp, toTarget;
     if (direction === null) {
@@ -127,47 +218,34 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
       toPos = target.clone()
         .add(direction.clone().normalize().multiplyScalar(dist));
       toTarget = target.clone();
-      // For pure top/bottom views, +y as up is degenerate. Pick a horizontal
-      // up vector pointing toward the rear of the arm so "front" reads at
-      // the bottom of the screen — the standard plan-view convention.
       const dy = direction.y;
       const dxz = Math.hypot(direction.x, direction.z);
       const isTopLike = Math.abs(dy) > 0.9 && dxz < 0.2;
-      if (isTopLike) {
-        toUp = new THREE.Vector3(-1, 0, 0);
-      } else {
-        toUp = new THREE.Vector3(0, 1, 0);
-      }
+      toUp = isTopLike
+        ? new THREE.Vector3(-1, 0, 0)
+        : new THREE.Vector3(0, 1, 0);
     }
 
-    const fromTarget = mainControls.target.clone();
     const t0 = performance.now();
     function step() {
       const t = Math.min((performance.now() - t0) / ANIMATE_MS, 1);
-      const e = t * t * (3 - 2 * t);   // smoothstep
+      const e = t * t * (3 - 2 * t);
       mainCamera.position.lerpVectors(fromPos, toPos, e);
       mainCamera.up.copy(fromUp).lerp(toUp, e).normalize();
       mainControls.target.lerpVectors(fromTarget, toTarget, e);
       mainCamera.lookAt(mainControls.target);
       mainControls.update();
-      if (t < 1) {
-        requestAnimationFrame(step);
-      } else {
-        animating = false;
-        mainControls.enabled = true;
-      }
+      if (t < 1) requestAnimationFrame(step);
+      else { animating = false; mainControls.enabled = true; }
     }
     requestAnimationFrame(step);
   }
 
-  // --- Tick ---------------------------------------------------------------
+  // --- Tick --------------------------------------------------------------
 
   function tick() {
-    // Cube widget camera mirrors the main camera's direction so the face
-    // currently aimed at the screen is always the one the user sees.
     const offset = new THREE.Vector3().subVectors(
-      mainCamera.position, mainControls.target,
-    );
+      mainCamera.position, mainControls.target);
     const len = offset.length();
     if (len < 1e-6) return;
     offset.multiplyScalar(4 / len);
@@ -182,42 +260,14 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
 
 // --- helpers --------------------------------------------------------------
 
-function directionFromLocalHit(local) {
-  // local is in [-0.5, 0.5]^3 with at least one component near ±0.5.
-  // Map each axis to {-1, 0, +1} based on whether it's "near boundary".
-  const dir = new THREE.Vector3();
-  const components = ["x", "y", "z"];
-  for (const ax of components) {
-    const c = local[ax];
-    if (c >  ZONE_THRESHOLD) dir[ax] = +1;
-    else if (c < -ZONE_THRESHOLD) dir[ax] = -1;
-  }
-  // BoxGeometry's surface always has at least one component within
-  // [0.499, 0.5] in absolute value; pull whichever is most extreme as a
-  // safety net so even thin clicks at the centre of a face still produce
-  // a face direction.
-  if (dir.lengthSq() === 0) {
-    let bestAx = "x", bestVal = Math.abs(local.x);
-    for (const ax of components) {
-      if (Math.abs(local[ax]) > bestVal) { bestAx = ax; bestVal = Math.abs(local[ax]); }
-    }
-    dir[bestAx] = local[bestAx] > 0 ? 1 : -1;
-  }
-  return dir;
-}
-
 function makeFaceTexture(label) {
   const SIZE = 256;
   const canvas = document.createElement("canvas");
   canvas.width = SIZE;
   canvas.height = SIZE;
   const ctx = canvas.getContext("2d");
-  // Subtle face fill so the cube reads on a light background.
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, SIZE, SIZE);
-  ctx.fillStyle = "#f1f3f7";
-  ctx.fillRect(8, 8, SIZE - 16, SIZE - 16);
-  // Label.
   ctx.fillStyle = "#1a1d23";
   ctx.font = "600 56px -apple-system, BlinkMacSystemFont, system-ui, sans-serif";
   ctx.textAlign = "center";
