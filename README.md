@@ -133,6 +133,23 @@ The full HTTP/JSON API is documented in [`docs/api.md`](docs/api.md).
 | `setup_id.py` | One-shot utility for changing a servo's bus ID. |
 | `calibrate.py` | Interactive joint-offset calibration; writes to `config.json`. |
 | `tests/` | CPython tests (run on a dev machine, not the Pico). |
+| `dev_server.py` | Run the web UI on a dev machine without hardware — software-simulated bus, MicroPython modules stubbed. |
+
+## Running the UI without hardware
+
+`dev_server.py` stubs the MicroPython modules and replaces the serial bus
+with `SimBus` — a software simulation that animates positions toward
+their targets — then runs the same `Server` on `localhost`. Useful for
+trying the web UI on a Mac / Linux box without flashing a Pico:
+
+```
+python3 dev_server.py            # → http://127.0.0.1:8000
+python3 dev_server.py 9000       # custom port
+```
+
+Torque starts on so sliders move the simulated arm immediately. The IK
+preview, `/api/pose`, the 3D viewer, and the CLI panel all work against
+the simulator.
 
 ## Testing on a dev machine
 
