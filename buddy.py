@@ -1,3 +1,5 @@
+import time
+
 from sts3215 import STS3215, degrees_to_position, position_to_degrees
 
 
@@ -56,6 +58,73 @@ class Buddy:
     def move_all(self, targets, speed=0, acc=50):
         for name, degrees in targets.items():
             self.move_joint(name, degrees, speed=speed, acc=acc)
+
+    def move_all_sync(self, targets, duration_ms=None, max_speed=None,
+                      acc=50, wait=False, poll_interval_ms=50, timeout_ms=10000):
+        """Move several joints so they arrive at their targets together.
+
+        Pass exactly one of:
+          duration_ms — every joint should take this long; per-joint speed is
+            scaled by its travel distance (delta / duration).
+          max_speed — speed for the longest-travel joint; shorter-travel joints
+            are scaled down so they finish at the same time.
+
+        If wait is True, poll read_moving on each joint until it reports
+        stopped or timeout_ms elapses.
+        """
+        if (duration_ms is None) == (max_speed is None):
+            raise ValueError("specify exactly one of duration_ms or max_speed")
+        if duration_ms is not None and duration_ms <= 0:
+            raise ValueError("duration_ms must be positive")
+        if max_speed is not None and max_speed <= 0:
+            raise ValueError("max_speed must be positive")
+
+        plan = []
+        for name, degrees in targets.items():
+            joint = self._joint(name)
+            clamped = max(joint["min_deg"], min(joint["max_deg"], degrees))
+            if clamped != degrees:
+                print("buddy: clamped", name, degrees, "->", clamped)
+            target_raw = self._user_to_raw(joint, clamped)
+            current_raw = self.bus.read_position(joint["id"])
+            if current_raw is None:
+                print("buddy: skip", name, "(no position)")
+                continue
+            delta = abs(target_raw - current_raw)
+            plan.append((name, joint, target_raw, delta))
+
+        if not plan:
+            return
+
+        if duration_ms is not None:
+            seconds = duration_ms / 1000.0
+            speeds = [max(1, int(delta / seconds)) for _, _, _, delta in plan]
+        else:
+            max_delta = max(delta for _, _, _, delta in plan) or 1
+            speeds = [max(1, int(max_speed * delta / max_delta))
+                      for _, _, _, delta in plan]
+
+        moving_ids = []
+        for (_, joint, target_raw, delta), speed in zip(plan, speeds):
+            self.bus.move(joint["id"], target_raw, speed=speed, acc=acc)
+            if delta > 0:
+                moving_ids.append(joint["id"])
+
+        if wait and moving_ids:
+            self._wait_for_stop(moving_ids, poll_interval_ms, timeout_ms)
+
+    def _wait_for_stop(self, ids, poll_interval_ms, timeout_ms):
+        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+        pending = list(ids)
+        while pending and time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            still = []
+            for sid in pending:
+                state = self.bus.read_moving(sid)
+                if state:
+                    still.append(sid)
+            pending = still
+            if pending:
+                time.sleep_ms(poll_interval_ms)
 
     def set_torque_all(self, enable):
         for j in self.joints.values():
