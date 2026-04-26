@@ -172,7 +172,11 @@ def main(argv=None):
 
     print("sim arm: open http://127.0.0.1:{}/ in a browser".format(port))
     print("        torque starts ON; toggle in the UI to test the off path")
-    server.serve_forever(host="127.0.0.1", port=port)
+    print("        ctrl-c to stop")
+    try:
+        server.serve_forever(host="127.0.0.1", port=port)
+    except KeyboardInterrupt:
+        print("\nsim arm: stopped, port released")
 
 
 if __name__ == "__main__":

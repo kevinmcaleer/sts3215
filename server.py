@@ -304,12 +304,24 @@ class Server:
     def serve_forever(self, host="0.0.0.0", port=80):  # pragma: no cover
         import socket
         sock = socket.socket()
-        sock.bind((host, port))
-        sock.listen(5)
-        print("server: listening on {}:{}".format(host, port))
-        while True:
-            conn, _addr = sock.accept()
+        # Allow rebinding immediately after the previous run exited — without
+        # this, the OS keeps the port in TIME_WAIT for ~30 s on CPython.
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except (AttributeError, OSError):
+            pass  # MicroPython ports without SO_REUSEADDR — ignore.
+        try:
+            sock.bind((host, port))
+            sock.listen(5)
+            print("server: listening on {}:{}".format(host, port))
+            while True:
+                conn, _addr = sock.accept()
+                try:
+                    self.handle_connection(conn)
+                except Exception as e:
+                    print("server: error", e)
+        finally:
             try:
-                self.handle_connection(conn)
-            except Exception as e:
-                print("server: error", e)
+                sock.close()
+            except Exception:
+                pass
