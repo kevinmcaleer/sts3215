@@ -25,6 +25,9 @@ class Buddy:
             self.joints = load_config(config_path)["joints"]
         else:
             self.joints = DEFAULT_JOINTS
+        # Last value passed to set_torque_all — exposed for status readouts.
+        # None means the state hasn't been set this session.
+        self.torque_enabled = None
 
     def _joint(self, name):
         if name not in self.joints:
@@ -129,6 +132,7 @@ class Buddy:
     def set_torque_all(self, enable):
         for j in self.joints.values():
             self.bus.set_torque(j["id"], enable)
+        self.torque_enabled = bool(enable)
 
     def gripper_open(self, speed=0, acc=50):
         joint = self._joint("gripper")
