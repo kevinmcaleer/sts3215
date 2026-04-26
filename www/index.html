@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Buddy</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Buddy</h1>
+    <div id="connection" class="pill pill-warn">connecting…</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="card-head">
+        <h2>Joints</h2>
+        <button id="torque" class="btn">torque: ?</button>
+      </div>
+      <div id="joints" class="joint-grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Gripper</h2>
+      </div>
+      <div class="gripper-row">
+        <button id="grip-open" class="btn">Open</button>
+        <button id="grip-close" class="btn">Close</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Status</h2>
+      </div>
+      <pre id="status-log">—</pre>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
