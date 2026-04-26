@@ -19,9 +19,18 @@ import * as THREE from "three";
 const SIZE_PX = 96;
 const ANIMATE_MS = 380;
 
-const CELL = 1 / 3;       // each subcube is 1/3 of the cube side
-const STEP = CELL;        // no gap — adjacent cells touch
-const OUTER = CELL * 1.5; // half cube extent
+// Non-uniform 3×3×3 layout: face cells get most of the side, with thin
+// strips for edges and small cubes for corners. The cube as a whole
+// still spans 1.0 along each axis (OUTER + CENTER + OUTER === 1).
+const OUTER  = 0.22;             // thin axis of edge cells / corner cells
+const CENTER = 1 - 2 * OUTER;    // fat axis of face cells / edge length
+
+function sizeFor(idx) {           // along one axis, given idx ∈ {-1, 0, +1}
+  return idx === 0 ? CENTER : OUTER;
+}
+function posFor(idx) {
+  return idx === 0 ? 0 : idx * (CENTER / 2 + OUTER / 2);
+}
 
 // Light-theme colours per zone, with a single hover tint on top.
 const COLOR_FACE   = 0xffffff;
@@ -123,10 +132,10 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
         }
 
         const mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(CELL, CELL, CELL),
+          new THREE.BoxGeometry(sizeFor(i), sizeFor(j), sizeFor(k)),
           materials,
         );
-        mesh.position.set(i * STEP, j * STEP, k * STEP);
+        mesh.position.set(posFor(i), posFor(j), posFor(k));
         mesh.userData.direction = new THREE.Vector3(i, j, k);
         mesh.userData.baseColor = baseColor;
         mesh.userData.materials = materials;
@@ -262,17 +271,32 @@ export function setupViewCube({ mountEl, mainCamera, mainControls, homeView }) {
 
 function makeFaceTexture(label) {
   const SIZE = 256;
+  const PADDING = 18;             // px around the text
+  const FONT_FAMILY =
+    "-apple-system, BlinkMacSystemFont, system-ui, sans-serif";
   const canvas = document.createElement("canvas");
   canvas.width = SIZE;
   canvas.height = SIZE;
   const ctx = canvas.getContext("2d");
+
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Pick the largest font size that lets the label fit within the
+  // available width. Starts generous and shrinks until measureText fits.
+  const available = SIZE - PADDING * 2;
+  let fontSize = SIZE - PADDING * 2;
+  ctx.font = `700 ${fontSize}px ${FONT_FAMILY}`;
+  while (fontSize > 16 && ctx.measureText(label).width > available) {
+    fontSize -= 2;
+    ctx.font = `700 ${fontSize}px ${FONT_FAMILY}`;
+  }
+
   ctx.fillStyle = "#1a1d23";
-  ctx.font = "600 56px -apple-system, BlinkMacSystemFont, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(label, SIZE / 2, SIZE / 2);
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.anisotropy = 4;
   return tex;
