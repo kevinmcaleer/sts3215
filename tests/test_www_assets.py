@@ -30,10 +30,11 @@ def _server():
 
 
 @pytest.mark.parametrize("path,marker,content_type", [
-    ("/",          b"<title>Buddy",      "text/html"),
-    ("/style.css", b".joint",            "text/css"),
-    ("/app.js",    b"/api/status",       "application/javascript"),
-    ("/viewer.js", b"three",             "application/javascript"),
+    ("/",          b"<title>Buddy", "text/html"),
+    ("/style.css", b".joint",       "text/css"),
+    ("/app.js",    b"/api/status",  "application/javascript"),
+    ("/viewer.js", b"three",        "application/javascript"),
+    ("/cli.js",    b"/api/status",  "application/javascript"),
 ])
 def test_static_bundle_is_reachable(path, marker, content_type):
     status, headers, body = _server().handle_request("GET", path, {}, b"")
@@ -55,8 +56,20 @@ def test_index_html_wires_in_viewer():
         body = f.read()
     assert b"viewer.js" in body, "index.html missing viewer.js script tag"
     assert b"importmap" in body, "index.html missing importmap"
-    # The importmap must point three at the unpkg CDN bundle.
     assert b"three" in body and b"unpkg.com/three" in body, \
         "index.html importmap missing three CDN entry"
-    # Viewer container element is required for viewer.js to mount.
     assert b'id="viewer"' in body, "index.html missing #viewer container"
+
+
+def test_cli_js_references_each_endpoint_it_drives():
+    with open(os.path.join(WWW_DIR, "cli.js"), "rb") as f:
+        body = f.read()
+    for endpoint in (b"/api/status", b"/api/joint/", b"/api/torque",
+                     b"/api/gripper", b"/api/pose", b"/api/move"):
+        assert endpoint in body, "cli.js missing " + endpoint.decode()
+
+
+def test_index_html_loads_cli_js():
+    with open(os.path.join(WWW_DIR, "index.html"), "rb") as f:
+        body = f.read()
+    assert b"cli.js" in body, "index.html does not reference cli.js"

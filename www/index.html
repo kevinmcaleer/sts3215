@@ -52,9 +52,20 @@
       </div>
       <pre id="status-log">—</pre>
     </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Console</h2>
+      </div>
+      <input id="cli-input" type="text" autocomplete="off" autocapitalize="off"
+             spellcheck="false"
+             placeholder="type a command (move, pose, torque, gripper, status, home)">
+      <pre id="cli-log"></pre>
+    </section>
   </main>
 
   <script type="module" src="/viewer.js"></script>
   <script src="/app.js"></script>
+  <script src="/cli.js"></script>
 </body>
 </html>
