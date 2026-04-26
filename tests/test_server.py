@@ -189,6 +189,66 @@ def test_pose_non_numeric_returns_400():
     assert status == 400
 
 
+# --- /api/ik (preview) ---
+
+
+def test_ik_preview_reachable_returns_angles():
+    server, bus, _ = _make_server()
+    from kinematics import L1, L2, L3, L4, L5
+    body = json.dumps({"x": 0, "y": 0,
+                       "z": L1 + L2 + L3 + L4 + L5}).encode()
+    status, _, resp = _call(server, "POST", "/api/ik", body)
+    assert status == 200
+    payload = _json(resp)
+    assert payload["reachable"] is True
+    angles = payload["angles"]
+    # All five arm joints present, gripper omitted.
+    assert set(angles.keys()) == {"base", "shoulder", "elbow",
+                                   "wrist_pitch", "wrist_roll"}
+    # Home pose → every angle ≈ 0.
+    for v in angles.values():
+        assert abs(v) < 1e-3
+    # No moves emitted — preview only.
+    assert bus.moves == []
+
+
+def test_ik_preview_unreachable_returns_400():
+    server, bus, _ = _make_server()
+    body = json.dumps({"x": 99999, "y": 0, "z": 0}).encode()
+    status, _, resp = _call(server, "POST", "/api/ik", body)
+    assert status == 400
+    payload = _json(resp)
+    assert payload["reachable"] is False
+    assert "unreachable" in payload["error"]
+    assert bus.moves == []
+
+
+def test_ik_preview_missing_xyz_returns_400():
+    server, _, _ = _make_server()
+    body = json.dumps({"x": 0, "y": 0}).encode()
+    status, _, _ = _call(server, "POST", "/api/ik", body)
+    assert status == 400
+
+
+def test_ik_preview_non_numeric_returns_400():
+    server, _, _ = _make_server()
+    body = json.dumps({"x": "huh", "y": 0, "z": 0}).encode()
+    status, _, _ = _call(server, "POST", "/api/ik", body)
+    assert status == 400
+
+
+def test_ik_preview_explicit_yaw_passes_through():
+    server, _, _ = _make_server()
+    from kinematics import L1, L2, L3, L4, L5
+    body = json.dumps({"x": 0, "y": 0, "z": L1 + L2 + L3 + L4 + L5,
+                       "yaw": 30.0}).encode()
+    status, _, resp = _call(server, "POST", "/api/ik", body)
+    assert status == 200
+    angles = _json(resp)["angles"]
+    # On-axis target with explicit yaw → base takes the supplied value.
+    assert abs(angles["base"] - 30.0) < 1e-3
+
+
 # --- /api/gripper, /api/torque ---
 
 

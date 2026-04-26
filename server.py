@@ -127,6 +127,8 @@ class Server:
             return self._move(data)
         if path == "/api/pose" and method == "POST":
             return self._pose(data)
+        if path == "/api/ik" and method == "POST":
+            return self._ik(data)
         if path == "/api/gripper" and method == "POST":
             return self._gripper(data)
         if path == "/api/torque" and method == "POST":
@@ -206,6 +208,35 @@ class Server:
         except ValueError as e:
             raise HttpError(400, str(e))
         return _json_response({"ok": True})
+
+    def _ik(self, data):
+        for k in ("x", "y", "z"):
+            if k not in data:
+                raise HttpError(400, "missing '{}'".format(k))
+        try:
+            x = float(data["x"]); y = float(data["y"]); z = float(data["z"])
+        except (TypeError, ValueError):
+            raise HttpError(400, "x, y, z must be numbers")
+        roll = float(data.get("roll", 0.0))
+        pitch = float(data.get("pitch", 0.0))
+        yaw = data.get("yaw")
+        if yaw is None:
+            import math as _m
+            yaw = _m.degrees(_m.atan2(y, x))
+        else:
+            yaw = float(yaw)
+        try:
+            from kinematics import inverse_kinematics
+        except ImportError:
+            raise HttpError(501, "kinematics module unavailable")
+        angles = inverse_kinematics((x, y, z, roll, pitch, yaw),
+                                    elbow_up=bool(data.get("elbow_up", False)))
+        if angles is None:
+            return _json_response(
+                {"reachable": False, "error": "pose unreachable"}, 400)
+        # Drop the gripper entry — the pose doesn't constrain it.
+        angles = {n: v for n, v in angles.items() if n != "gripper"}
+        return _json_response({"reachable": True, "angles": angles})
 
     def _gripper(self, data):
         state = data.get("state")

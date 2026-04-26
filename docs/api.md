@@ -69,6 +69,23 @@ optional (default 0; `yaw` defaults to `atan2(y, x)`). Returns `400` with
 `"unreachable"` in the message if IK can't solve, `501` if the running build
 of `Buddy` lacks `move_to_pose`.
 
+### `POST /api/ik`
+
+Solve inverse kinematics for a pose **without moving** — useful for
+previewing the joint angles in the UI before committing.
+
+```json
+{
+  "x": 120, "y": 0, "z": 200,
+  "roll": 0, "pitch": 30, "yaw": null,
+  "elbow_up": false
+}
+```
+
+Same field meanings as `/api/pose`. Reachable: `200` with
+`{"reachable": true, "angles": {...}}`. Unreachable: `400` with
+`{"reachable": false, "error": "..."}`.
+
 ### `POST /api/gripper`
 
 ```json
