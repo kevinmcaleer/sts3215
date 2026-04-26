@@ -22,3 +22,9 @@ MicroPython driver for **Feetech STS3215 serial bus servos**. The entire codebas
 ## Deploying
 
 Copy `sts3215.py` to the microcontroller filesystem (e.g., via `mpremote cp sts3215.py :` or Thonny).
+
+## Testing
+
+for each new feature, bugfix or change run the suite of tests in tests/ to verify that the code is working as expected. Tests can be run using pytest or any other testing framework that supports MicroPython.
+for each new feature - be sure to create new tests to ensure the code works as expected and to prevent regressions in the future. Tests should cover a variety of scenarios, including edge cases and error handling.
+code coverage should be 80% or higher.
