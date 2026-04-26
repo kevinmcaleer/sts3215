@@ -137,3 +137,31 @@ class Buddy:
     def gripper_close(self, speed=0, acc=50):
         joint = self._joint("gripper")
         self.move_joint("gripper", joint["min_deg"], speed=speed, acc=acc)
+
+    def move_to_pose(self, x, y, z, roll=0.0, pitch=0.0, yaw=None,
+                     duration_ms=None, max_speed=None, acc=50,
+                     wait=False, elbow_up=False):
+        """Solve IK for the target pose and move all joints together.
+
+        If yaw is omitted, the base rotation is taken from atan2(y, x).
+        Raises ValueError if the pose is outside the workspace.
+        """
+        from kinematics import inverse_kinematics
+        import math as _math
+
+        if yaw is None:
+            yaw = _math.degrees(_math.atan2(y, x))
+        angles = inverse_kinematics((x, y, z, roll, pitch, yaw),
+                                    elbow_up=elbow_up)
+        if angles is None:
+            raise ValueError("pose unreachable: ({}, {}, {})".format(x, y, z))
+
+        # The IK result includes a gripper entry; the pose doesn't constrain
+        # the gripper, so leave that joint alone. Also skip any joint not
+        # present in this Buddy's config.
+        targets = {n: a for n, a in angles.items()
+                   if n != "gripper" and n in self.joints}
+        if duration_ms is None and max_speed is None:
+            max_speed = 600
+        self.move_all_sync(targets, duration_ms=duration_ms,
+                           max_speed=max_speed, acc=acc, wait=wait)

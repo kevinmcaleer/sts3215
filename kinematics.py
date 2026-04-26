@@ -137,3 +137,79 @@ def joint_angles_from_buddy(buddy):
     return {name: (positions.get(name) if positions.get(name) is not None
                    else 0.0)
             for name in JOINT_ORDER}
+
+
+# --- Inverse kinematics ---------------------------------------------------
+
+
+def inverse_kinematics(target_pose, elbow_up=False, yaw_tolerance_deg=1.0):
+    """Solve for joint angles that achieve the target pose.
+
+    The arm has 5 effective rotational DOF (base + 3 pitch + wrist_roll), so
+    the arm always lies in the vertical plane containing the base axis and
+    the target. The pose is interpreted intrinsically:
+      - yaw    → base rotation; must be consistent with atan2(y, x).
+      - pitch  → approach pitch in the arm plane (sum of shoulder + elbow +
+                 wrist_pitch).
+      - roll   → wrist_roll twist about the approach axis.
+
+    Args:
+        target_pose: (x, y, z, roll_deg, pitch_deg, yaw_deg) in mm / degrees.
+        elbow_up: pick the elbow-up branch of the 2-link IK (else elbow-down).
+        yaw_tolerance_deg: how far the requested yaw may sit from
+            atan2(y, x) before the pose is rejected. The check is skipped
+            when the target is on the base axis (xy ≈ 0).
+
+    Returns:
+        dict of joint angles in degrees keyed by JOINT_ORDER (gripper = 0),
+        or None if the pose is outside the workspace or yaw is inconsistent.
+    """
+    x, y, z, roll_deg, pitch_deg, yaw_deg = target_pose
+
+    # Base rotation: arm plane must contain the target.
+    on_axis = math.sqrt(x * x + y * y) < 1e-6
+    if on_axis:
+        base_deg = yaw_deg
+    else:
+        base_deg = math.degrees(math.atan2(y, x))
+        delta = ((yaw_deg - base_deg + 180.0) % 360.0) - 180.0
+        if abs(delta) > yaw_tolerance_deg:
+            return None
+
+    # Project the target into the arm's vertical (r, z) plane.
+    r = math.sqrt(x * x + y * y)
+    phi = math.radians(pitch_deg)
+
+    # Wrist-pitch axis sits (L4 + L5) back along the approach direction.
+    rw = r - (L4 + L5) * math.sin(phi)
+    zw = z - (L4 + L5) * math.cos(phi)
+
+    # Two-link planar IK from the shoulder pivot at (0, L1) to the wrist
+    # centre (rw, zw).
+    dr = rw
+    dz = zw - L1
+    d_sq = dr * dr + dz * dz
+    d = math.sqrt(d_sq)
+    if d > L2 + L3 or d < abs(L2 - L3):
+        return None
+
+    cos_e = (d_sq - L2 * L2 - L3 * L3) / (2.0 * L2 * L3)
+    cos_e = max(-1.0, min(1.0, cos_e))
+    theta_e = math.acos(cos_e)
+    if elbow_up:
+        theta_e = -theta_e
+
+    alpha = math.atan2(dr, dz)
+    beta = math.atan2(L3 * math.sin(theta_e), L2 + L3 * math.cos(theta_e))
+    theta_s = alpha - beta
+
+    theta_wp = phi - theta_s - theta_e
+
+    return {
+        "base":        base_deg,
+        "shoulder":    math.degrees(theta_s),
+        "elbow":       math.degrees(theta_e),
+        "wrist_pitch": math.degrees(theta_wp),
+        "wrist_roll":  roll_deg,
+        "gripper":     0.0,
+    }

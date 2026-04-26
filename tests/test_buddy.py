@@ -298,3 +298,48 @@ def test_move_all_sync_wait_respects_timeout(monkeypatch):
     # exceeded on the first loop check, so wait exits without hanging.
     b.move_all_sync({"a": 90, "b": 30}, max_speed=900,
                     wait=True, poll_interval_ms=0, timeout_ms=50)
+
+
+# --- move_to_pose ---------------------------------------------------------
+
+
+def _seed_default_positions(bus):
+    """Seed read_position for every default-joint id so move_all_sync can run."""
+    for j in DEFAULT_JOINTS.values():
+        bus.positions[j["id"]] = degrees_to_position(0)
+
+
+def test_move_to_pose_sends_moves_for_arm_joints_only():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    # Home pose target → all-zero IK solution; move_to_pose should issue
+    # moves for every arm joint (5) and skip the gripper.
+    from kinematics import L1, L2, L3, L4, L5
+    b.move_to_pose(0.0, 0.0, L1 + L2 + L3 + L4 + L5)
+    sids = sorted(m[0] for m in bus.moves)
+    arm_ids = sorted(j["id"] for n, j in DEFAULT_JOINTS.items() if n != "gripper")
+    assert sids == arm_ids
+    assert DEFAULT_JOINTS["gripper"]["id"] not in {m[0] for m in bus.moves}
+
+
+def test_move_to_pose_unreachable_raises():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    with pytest.raises(ValueError):
+        b.move_to_pose(99999.0, 0.0, 0.0)
+
+
+def test_move_to_pose_yaw_default_uses_atan2():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    # Reachable point in +y; default yaw should align the arm plane.
+    from kinematics import L2, L3, L4, L5
+    b.move_to_pose(0.0, L2 + L3 + L4 + L5, 0.0 + 60.0,  # arbitrary z
+                   pitch=90.0)
+    # If yaw default were wrong, IK would reject the pose. Reaching here is
+    # enough — confirm a base move was emitted.
+    base_id = DEFAULT_JOINTS["base"]["id"]
+    assert any(m[0] == base_id for m in bus.moves)
