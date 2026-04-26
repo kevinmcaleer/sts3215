@@ -14,9 +14,15 @@ DEFAULT_JOINTS = {
 class Buddy:
     """Six-joint arm wrapper around the STS3215 bus driver."""
 
-    def __init__(self, bus, joints=None):
+    def __init__(self, bus, joints=None, config_path=None):
         self.bus = bus
-        self.joints = joints if joints is not None else DEFAULT_JOINTS
+        if joints is not None:
+            self.joints = joints
+        elif config_path is not None:
+            from config import load_config
+            self.joints = load_config(config_path)["joints"]
+        else:
+            self.joints = DEFAULT_JOINTS
 
     def _joint(self, name):
         if name not in self.joints:

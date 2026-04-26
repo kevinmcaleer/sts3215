@@ -5,7 +5,7 @@ from buddy import Buddy
 
 
 bus = STS3215(uart_id=0, tx_pin=0, rx_pin=1, baudrate=1_000_000)
-buddy = Buddy(bus)
+buddy = Buddy(bus, config_path="/config.json")
 
 print("Ping:", buddy.ping_all())
 time.sleep_ms(200)
