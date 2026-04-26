@@ -1,39 +1,180 @@
-# STS3215
+# Buddy
 
-MicroPython driver and demo code for Feetech **STS3215** serial bus servos,
-targeted at the Raspberry Pi Pico (RP2040).
+A MicroPython-powered 6-DOF robot arm built around Feetech **STS3215** serial
+bus servos. Targets RP2040 (Raspberry Pi Pico W or equivalent) and ships with
+a small web UI — sliders, 3D viewer, IK target controls, and a command
+console — served from the device itself over Wi-Fi.
 
-Companion code for the YouTube video
-*"Why are Bus Servos Better?"*.
+> See [`design/epic.md`](design/epic.md) for the project's vision and
+> [`docs/api.md`](docs/api.md) for the HTTP/JSON API reference.
 
-## Files
+## Hardware
 
-| File | Purpose |
+| Item | Notes |
 | --- | --- |
-| `sts3215.py` | The driver library. Copy this to the Pico filesystem — every other script imports from it. |
-| `setup_id.py` | One-shot utility for changing a servo's bus ID. STS3215s ship with ID `1`, so connect **one servo at a time** and run this to assign unique IDs before daisy-chaining. |
-| `demo.py` | The mini demo featured in the video. Two servos (IDs 1 and 2) daisy-chained on a single bus sweep in a wave pattern, with live position feedback printed to the terminal. |
-| `demo02.py` | A simpler single-servo example. Moves servo ID 1 between its minimum and maximum positions and polls position/speed/moving state until each move completes — useful for sanity-checking a new setup. |
+| Microcontroller | RP2040 with Wi-Fi (Pico W). Any MicroPython board with a free UART works for the servo bus, but the web UI needs the Wi-Fi-capable variant. |
+| 6 × Feetech STS3215 servos | Daisy-chained on a single half-duplex bus. |
+| Servo driver board | e.g. Waveshare *Serial Bus Servo Driver Board for Pico* — exposes the half-duplex tri-state buffer the protocol needs. |
+| Power | 7.4 V (2S LiPo) for the servos. The Pico runs from USB or a regulated 5 V rail; **do not** power the servo bus from the Pico. |
+| Wiring | UART0 with `TX = GP0`, `RX = GP1`, 1 Mbaud (the Waveshare board's default). |
 
-## Wiring
+## First-time setup
 
-The scripts default to UART0 with `TX = GP0`, `RX = GP1`, at 1 Mbaud — which
-matches the Waveshare Serial Bus Servo Driver Board for the Pico. Power the
-servos from a 7.4 V supply (a 2S LiPo works well).
+### 1. Flash MicroPython
 
-## Deploying
+Download the latest MicroPython firmware for your board (Pico W:
+`RPI_PICO_W-*.uf2`), hold BOOTSEL, plug in USB, and copy the .uf2 file onto
+the mounted volume. The board reboots into MicroPython.
 
-Copy `sts3215.py` (plus whichever script you want to run) to the Pico:
+### 2. Assign servo IDs
+
+STS3215s ship with ID `1`. Connect **one servo at a time** to the bus and run
+`setup_id.py` to give each a unique ID (1–6 by convention: base, shoulder,
+elbow, wrist_pitch, wrist_roll, gripper).
 
 ```
 mpremote cp sts3215.py :
-mpremote cp demo.py :
-mpremote run demo.py
+mpremote cp setup_id.py :
+mpremote run setup_id.py   # edit the script to set the new ID before running
 ```
 
-Thonny works too — just open the files and save them to the device.
+Once each servo has a unique ID, daisy-chain them together.
 
-## Requirements
+### 3. Copy the project to the device
 
-- MicroPython firmware on an RP2040 (or any MicroPython board with a free UART)
-- No CPython dependencies — the driver uses only `machine` and `time`
+```
+mpremote cp sts3215.py :
+mpremote cp buddy.py :
+mpremote cp config.py :
+mpremote cp kinematics.py :
+mpremote cp wifi.py :
+mpremote cp server.py :
+mpremote cp -r www :
+```
+
+(Thonny works too — just open and save each file. Skip the demo / test
+files; they aren't needed at runtime.)
+
+### 4. Calibrate joint offsets
+
+With torque off, hold the arm in its **home pose** (all joints at 0° in your
+chosen convention — typically arm extended straight up) and run:
+
+```
+mpremote run calibrate.py
+```
+
+This reads each servo's raw position and writes a `config.json` to the
+device flash with `offset_deg` per joint, so subsequent reads/writes use a
+clean user frame (0° = home).
+
+### 5. Wi-Fi provisioning
+
+On first boot the device finds no Wi-Fi credentials and starts an open
+access point named **`Buddy-Setup`** (configurable). Join it from your phone
+or laptop, browse to the device IP printed on USB serial — typically
+`http://192.168.4.1` — and POST your home-network credentials:
+
+```
+curl -X POST http://192.168.4.1/api/wifi \
+  -H 'Content-Type: application/json' \
+  -d '{"ssid": "yourwifi", "password": "yourpassword"}'
+```
+
+Reboot the device. It now joins your home network and prints its new IP on
+USB serial. Visit that IP in a browser to use the UI.
+
+## Boot script
+
+A minimal `main.py` (which MicroPython runs automatically on boot) ties it
+all together:
+
+```python
+from sts3215 import STS3215
+from buddy import Buddy
+from wifi import boot_network
+from server import Server
+
+bus    = STS3215(uart_id=0, tx_pin=0, rx_pin=1, baudrate=1_000_000)
+buddy  = Buddy(bus, config_path="/config.json")
+net    = boot_network()
+print("network:", net)
+
+Server(buddy).serve_forever(host="0.0.0.0", port=80)
+```
+
+## Web UI
+
+Open the device's IP in a browser. The UI is served from the device's
+`/www/` directory and includes:
+
+- **3D viewer** (Three.js, loaded from a CDN) — live model of the arm.
+- **Joints** — slider per joint, debounced live control; torque on/off.
+- **Gripper** — open / close.
+- **Pose target** — XYZ + orientation entry. **Preview** runs IK without
+  moving so you can sanity-check the joint angles; **Go** commits the move.
+- **Console** — text command panel with grammar
+  `move`, `pose`, `torque`, `gripper`, `status`, `home`. Up/Down recalls
+  history; Tab completes joint names.
+
+The full HTTP/JSON API is documented in [`docs/api.md`](docs/api.md).
+
+## Module map
+
+| File | Purpose |
+| --- | --- |
+| `sts3215.py` | Low-level serial-bus driver (ping, read/write registers, move). |
+| `buddy.py` | 6-joint wrapper: per-joint config, multi-joint moves, IK convenience method. |
+| `kinematics.py` | Pure-Python forward and inverse kinematics. Tunable link-length constants. |
+| `config.py` | `config.json` load/save (joints + Wi-Fi creds). |
+| `wifi.py` | Connect to stored Wi-Fi; fall back to AP mode on failure. |
+| `server.py` | Hand-rolled HTTP server. Serves `/www/` and exposes `/api/*`. |
+| `www/` | Static UI bundle: `index.html`, `style.css`, `app.js`, `viewer.js`, `cli.js`, `pose.js`. |
+| `setup_id.py` | One-shot utility for changing a servo's bus ID. |
+| `calibrate.py` | Interactive joint-offset calibration; writes to `config.json`. |
+| `tests/` | CPython tests (run on a dev machine, not the Pico). |
+
+## Testing on a dev machine
+
+The test suite stubs `machine` and `network` so the driver and helpers can
+be exercised without hardware:
+
+```
+python -m pytest tests/
+```
+
+Run with coverage to keep an eye on the bar (the project targets ≥80 %):
+
+```
+python -m pytest tests/ --cov=. --cov-report=term-missing
+```
+
+## Troubleshooting
+
+- **No reply from any servo.** Check power (7.4 V on the bus rail), the
+  half-duplex direction pin (the driver board needs it for TX/RX
+  switching), and that every servo has a unique ID. The `setup_id.py`
+  comments cover the gotchas.
+- **One servo replies, the rest don't.** Most likely two servos share an
+  ID — re-run `setup_id.py` with one connected at a time.
+- **Wi-Fi never joins.** Try the AP fallback to re-enter credentials. The
+  `boot_network()` log on USB serial says exactly which path it took.
+- **Web UI loads but sliders don't move the arm.** Check torque — the UI
+  toggle defaults to whatever the device last had set. Some servos refuse
+  goal-position writes when torque is off.
+- **3D viewer is blank.** The page loads Three.js from a CDN; if the
+  network blocks `unpkg.com` the viewer panel stays empty but the rest of
+  the UI keeps working.
+- **Pose target says "unreachable".** The arm has 5 effective DOF, so the
+  yaw of the gripper must equal `atan2(y, x)` for off-axis targets. Leave
+  the yaw input blank and let the server compute it.
+
+## License
+
+MIT — see `LICENSE` (if present) or treat the source as MIT-licensed.
+
+---
+
+This project began as the companion code for the YouTube video
+*"Why are Bus Servos Better?"*; the standalone driver and demo scripts
+(`demo.py`, `demo02.py`) still live in the repo as a minimal entry point.
