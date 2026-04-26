@@ -23,6 +23,7 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 
 // Link lengths in millimetres. MUST stay in sync with kinematics.py.
 const L1 = 60.0;   // base column
@@ -38,6 +39,11 @@ const COLOR_LINK = 0x6da6ff;
 const COLOR_JOINT = 0xf2c14e;
 const COLOR_GRIPPER = 0xff8a5b;
 const COLOR_BASE_PLATE = 0x35404f;
+const COLOR_HANDLE = 0x88ddff;
+const COLOR_HANDLE_HOVER = 0xfff4a1;
+const COLOR_HANDLE_ERROR = 0xff6a6a;
+const HANDLE_RADIUS = 22;        // mm — picks up easily on phone screens
+const HANDLE_GRACE_MS = 250;     // keep gizmo open this long after mouse leaves
 
 // Each joint name maps to an Object3D pivot. Setting `.rotation.<axis>`
 // on these is the only thing the poll loop has to do.
@@ -106,8 +112,17 @@ function init(container) {
   resize();
   window.addEventListener("resize", resize);
 
+  // End-effector drag handle: hover the marker to summon arrows, drag an
+  // arrow to retarget the gripper. Release sends POST /api/pose with the
+  // resulting xyz (orientation is left to the server's atan2(y, x) default).
+  const handleState = setUpDragHandle({
+    scene, camera, renderer, controls,
+    getTipWorldPosition: (out) => pivots.gripper.getWorldPosition(out),
+  });
+
   function animate() {
     controls.update();
+    handleState.tick();
     renderer.render(scene, camera);
     requestAnimationFrame(animate);
   }
@@ -115,6 +130,141 @@ function init(container) {
 
   // Independent poll loop — does not share state with app.js.
   pollStatus();
+}
+
+// --- Drag handle ----------------------------------------------------------
+
+function setUpDragHandle({ scene, camera, renderer, controls,
+                          getTipWorldPosition }) {
+  // The handle lives in world space, parented to the scene (NOT the rig),
+  // so its position is read out directly without any extra matrix work.
+  const handleMat = new THREE.MeshStandardMaterial({
+    color: COLOR_HANDLE, transparent: true, opacity: 0.55,
+    roughness: 0.35, metalness: 0.1,
+  });
+  const handle = new THREE.Mesh(
+    new THREE.SphereGeometry(HANDLE_RADIUS, 18, 14), handleMat);
+  handle.renderOrder = 2;
+  scene.add(handle);
+
+  const tc = new TransformControls(camera, renderer.domElement);
+  tc.attach(handle);
+  tc.setMode("translate");
+  tc.setSize(0.9);
+  tc.visible = false;
+  tc.enabled = false;
+  scene.add(tc);
+
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  let hoverHide = 0;     // timestamp at which to hide if no further hover
+  let autoTrack = true;  // pause while user is dragging
+
+  // Initial position: right at the tip on first frame.
+  getTipWorldPosition(handle.position);
+
+  // While the user is interacting with TransformControls, pause OrbitControls
+  // so the camera doesn't fight with the gizmo.
+  tc.addEventListener("dragging-changed", (ev) => {
+    controls.enabled = !ev.value;
+    if (ev.value) {
+      autoTrack = false;
+      handleMat.color.setHex(COLOR_HANDLE_HOVER);
+    } else {
+      // Drag end → send pose. Re-enable auto-tracking only after the response
+      // settles (or after a small delay if the request hangs).
+      sendPose(handle.position).finally(() => {
+        autoTrack = true;
+        handleMat.color.setHex(COLOR_HANDLE);
+      });
+    }
+  });
+
+  function showGizmo() {
+    tc.visible = true;
+    tc.enabled = true;
+    handleMat.color.setHex(COLOR_HANDLE_HOVER);
+    handleMat.opacity = 0.9;
+  }
+  function hideGizmo() {
+    if (tc.dragging) return;
+    tc.visible = false;
+    tc.enabled = false;
+    handleMat.color.setHex(COLOR_HANDLE);
+    handleMat.opacity = 0.55;
+  }
+
+  function flashError() {
+    const orig = handleMat.color.getHex();
+    handleMat.color.setHex(COLOR_HANDLE_ERROR);
+    setTimeout(() => handleMat.color.setHex(orig), 350);
+  }
+
+  // Hover detection. We test against the handle sphere AND, if the gizmo is
+  // already showing, against its arrow meshes — otherwise the user would
+  // lose the gizmo the instant their cursor crossed onto an arrow.
+  function onPointerMove(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+
+    const targets = [handle];
+    if (tc.visible) {
+      tc.traverse((o) => { if (o.isMesh) targets.push(o); });
+    }
+    const hits = raycaster.intersectObjects(targets, false);
+    if (hits.length > 0) {
+      hoverHide = 0;
+      showGizmo();
+    } else if (tc.visible && !tc.dragging) {
+      // Defer the hide so a quick cursor jitter from sphere → arrow doesn't
+      // dismiss the gizmo.
+      if (hoverHide === 0) hoverHide = performance.now() + HANDLE_GRACE_MS;
+    }
+  }
+
+  renderer.domElement.addEventListener("pointermove", onPointerMove);
+  renderer.domElement.addEventListener("pointerleave", () => {
+    if (!tc.dragging) hoverHide = performance.now() + HANDLE_GRACE_MS;
+  });
+
+  async function sendPose(worldPos) {
+    // Three is +y-up; kinematics is +z-up. The rig is rotated -90° about
+    // world x at the top level, so:
+    //     x_robot = x_world
+    //     y_robot = -z_world
+    //     z_robot = y_world
+    const body = {
+      x: worldPos.x,
+      y: -worldPos.z,
+      z: worldPos.y,
+      duration_ms: 1500,
+    };
+    try {
+      const r = await fetch("/api/pose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) flashError();
+    } catch (_e) {
+      flashError();
+    }
+  }
+
+  function tick() {
+    if (autoTrack && !tc.dragging) {
+      getTipWorldPosition(handle.position);
+    }
+    if (hoverHide && !tc.dragging && performance.now() >= hoverHide) {
+      hoverHide = 0;
+      hideGizmo();
+    }
+  }
+
+  return { tick, handle, transformControls: tc };
 }
 
 // Build the kinematic chain as parented pivots. Geometry is authored in

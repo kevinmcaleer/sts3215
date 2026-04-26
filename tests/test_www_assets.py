@@ -62,6 +62,17 @@ def test_index_html_wires_in_viewer():
     assert b'id="viewer"' in body, "index.html missing #viewer container"
 
 
+def test_viewer_js_wires_drag_handle():
+    with open(os.path.join(WWW_DIR, "viewer.js"), "rb") as f:
+        body = f.read()
+    assert b"TransformControls" in body, \
+        "viewer.js missing TransformControls import for the drag handle"
+    assert b"/api/pose" in body, \
+        "viewer.js missing /api/pose POST for drag-end submission"
+    assert b"dragging-changed" in body, \
+        "viewer.js missing TransformControls dragging event listener"
+
+
 def test_cli_js_references_each_endpoint_it_drives():
     with open(os.path.join(WWW_DIR, "cli.js"), "rb") as f:
         body = f.read()
