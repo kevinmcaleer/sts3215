@@ -202,12 +202,15 @@ class Server:
         if not hasattr(self.buddy, "move_to_pose"):
             raise HttpError(501, "pose endpoint requires Buddy.move_to_pose")
         try:
-            self.buddy.move_to_pose(x, y, z, roll=roll, pitch=pitch, yaw=yaw,
-                                    duration_ms=data.get("duration_ms"),
-                                    max_speed=data.get("max_speed"))
+            angles = self.buddy.move_to_pose(
+                x, y, z, roll=roll, pitch=pitch, yaw=yaw,
+                duration_ms=data.get("duration_ms"),
+                max_speed=data.get("max_speed"))
         except ValueError as e:
             raise HttpError(400, str(e))
-        return _json_response({"ok": True})
+        # Return the joint targets so the UI can apply them optimistically
+        # before the arm finishes moving. Older callers ignore the field.
+        return _json_response({"ok": True, "angles": angles or {}})
 
     def _ik(self, data):
         for k in ("x", "y", "z"):

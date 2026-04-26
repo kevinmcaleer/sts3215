@@ -1,7 +1,6 @@
 "use strict";
 
 const POLL_MS = 250;
-const DEBOUNCE_MS = 120;
 
 const els = {
   joints:    document.getElementById("joints"),
@@ -14,8 +13,36 @@ const els = {
 
 const sliders = {};        // joint name → input element
 const valLabels = {};      // joint name → span showing current value
-const debounceTimers = {}; // joint name → setTimeout handle
 let jointConfig = null;    // populated from /api/status on first poll
+
+// In-flight network state per joint. Slider input dispatches the optimistic
+// UI event immediately; the network call goes through `sendJointSoon`,
+// which keeps at most one request in flight per joint and queues the
+// latest target value to send on completion. Last-write-wins, no debounce
+// delay between drag and command.
+const inFlight = {};
+const pending  = {};
+
+// Public hook: any other script (or even devtools) can call
+// `BuddyState.applyAngles({elbow: 45})` to push an optimistic update into
+// the 3D view + sliders without waiting on the next poll.
+window.BuddyState = {
+  positions: {},
+  torque_enabled: null,
+  applyAngles(angles, opts) {
+    const optimistic = !!(opts && opts.optimistic);
+    Object.assign(this.positions, angles);
+    if (optimistic) {
+      // Don't fight the slider the user is dragging.
+      updateSliders(angles, { skipActive: true });
+    } else {
+      updateSliders(angles, { skipActive: true });
+    }
+    document.dispatchEvent(new CustomEvent("buddy:angles", {
+      detail: { angles, optimistic },
+    }));
+  },
+};
 
 function setConn(state, label) {
   els.conn.className = "pill pill-" + state;
@@ -23,9 +50,20 @@ function setConn(state, label) {
 }
 
 function setTorqueButton(enabled) {
-  if (enabled === true)  { els.torque.className = "btn on";  els.torque.textContent = "torque: on"; }
-  else if (enabled === false) { els.torque.className = "btn off"; els.torque.textContent = "torque: off"; }
-  else                   { els.torque.className = "btn";     els.torque.textContent = "torque: ?"; }
+  if (enabled === true) {
+    els.torque.className = "btn on";
+    els.torque.textContent = "torque: on";
+  } else if (enabled === false) {
+    els.torque.className = "btn off";
+    els.torque.textContent = "torque: off";
+  } else {
+    els.torque.className = "btn";
+    els.torque.textContent = "torque: ?";
+  }
+  window.BuddyState.torque_enabled = enabled;
+  document.dispatchEvent(new CustomEvent("buddy:torque", {
+    detail: { enabled },
+  }));
 }
 
 async function api(path, opts) {
@@ -59,8 +97,15 @@ function buildJointRow(name, defaults) {
   val.textContent = defaults.value.toFixed(0) + "°";
 
   input.addEventListener("input", () => {
-    val.textContent = (+input.value).toFixed(0) + "°";
-    debounceJoint(name, +input.value);
+    const v = +input.value;
+    val.textContent = v.toFixed(0) + "°";
+    // Fire the optimistic event before the network call so the 3D viewer
+    // can update on the same frame as the slider.
+    window.BuddyState.positions[name] = v;
+    document.dispatchEvent(new CustomEvent("buddy:angles", {
+      detail: { angles: { [name]: v }, optimistic: true },
+    }));
+    sendJointSoon(name, v);
   });
 
   row.appendChild(label);
@@ -72,25 +117,36 @@ function buildJointRow(name, defaults) {
   return row;
 }
 
-function debounceJoint(name, degrees) {
-  clearTimeout(debounceTimers[name]);
-  debounceTimers[name] = setTimeout(() => {
-    api("/api/joint/" + encodeURIComponent(name), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ degrees }),
-    }).catch(err => log("joint " + name + " failed: " + err.message));
-  }, DEBOUNCE_MS);
+function sendJointSoon(name, degrees) {
+  pending[name] = degrees;
+  if (inFlight[name]) return;            // request in progress; will pick up
+  inFlight[name] = drainJoint(name);
+}
+
+async function drainJoint(name) {
+  while (pending[name] !== undefined) {
+    const value = pending[name];
+    delete pending[name];
+    try {
+      await api("/api/joint/" + encodeURIComponent(name), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ degrees: value }),
+      });
+    } catch (err) {
+      log("joint " + name + " failed: " + err.message);
+    }
+  }
+  delete inFlight[name];
 }
 
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
-  els.log.textContent = ("[" + ts + "] " + msg + "\n" + els.log.textContent).slice(0, 4000);
+  els.log.textContent =
+    ("[" + ts + "] " + msg + "\n" + els.log.textContent).slice(0, 4000);
 }
 
-async function buildJointGrid(positions) {
-  // First time: fabricate sliders. We don't know per-joint min/max from
-  // /api/status alone — assume 0..360 to match Buddy's default config.
+function buildJointGrid(positions) {
   els.joints.innerHTML = "";
   for (const name of Object.keys(positions)) {
     const value = +positions[name] || 0;
@@ -99,14 +155,15 @@ async function buildJointGrid(positions) {
   jointConfig = Object.keys(positions);
 }
 
-function updateSliders(positions) {
+function updateSliders(positions, opts) {
+  const skipActive = !!(opts && opts.skipActive);
   for (const name of Object.keys(positions)) {
     const v = +positions[name];
     if (!Number.isFinite(v)) continue;
     const slider = sliders[name];
     if (!slider) continue;
-    // Don't yank the slider while the user is dragging.
-    if (document.activeElement === slider) continue;
+    // Don't yank the slider the user is currently dragging.
+    if (skipActive && document.activeElement === slider) continue;
     slider.value = v;
     valLabels[name].textContent = v.toFixed(0) + "°";
   }
@@ -117,11 +174,14 @@ async function poll() {
     const status = await api("/api/status");
     setConn("ok", "online");
     if (!jointConfig) {
-      await buildJointGrid(status.positions);
-    } else {
-      updateSliders(status.positions);
+      buildJointGrid(status.positions);
     }
+    Object.assign(window.BuddyState.positions, status.positions);
+    updateSliders(status.positions, { skipActive: true });
     setTorqueButton(status.torque_enabled);
+    document.dispatchEvent(new CustomEvent("buddy:status", {
+      detail: { status },
+    }));
   } catch (err) {
     setConn("err", "offline");
   } finally {
@@ -130,7 +190,6 @@ async function poll() {
 }
 
 els.torque.addEventListener("click", async () => {
-  // Toggle based on current label state.
   const next = !els.torque.classList.contains("on");
   try {
     await api("/api/torque", {

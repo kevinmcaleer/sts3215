@@ -87,6 +87,11 @@
     const { ok, body } = await postJSON("/api/pose", pose);
     if (ok) {
       setPill("ok", "sent");
+      // Immediately apply the IK angles so sliders + 3D viewer don't wait
+      // for the next /api/status poll.
+      if (body && body.angles && window.BuddyState) {
+        window.BuddyState.applyAngles(body.angles, { optimistic: true });
+      }
     } else {
       const msg = (body && body.error) || "request failed";
       setPill("err", msg);

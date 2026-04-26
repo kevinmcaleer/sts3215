@@ -32,13 +32,15 @@ const L3 = 110.0;  // forearm
 const L4 = 40.0;   // wrist
 const L5 = 70.0;   // gripper / tool
 
-const POLL_MS = 250;
 const LINK_RADIUS = 14;          // mm — looks chunky enough on a phone
 const JOINT_RADIUS = 18;         // mm — knuckle accents at each joint
-const COLOR_LINK = 0x6da6ff;
-const COLOR_JOINT = 0xf2c14e;
-const COLOR_GRIPPER = 0xff8a5b;
-const COLOR_BASE_PLATE = 0x35404f;
+const SCENE_BG = 0xe8ecf2;
+const COLOR_LINK = 0x4d7dc4;
+const COLOR_JOINT = 0xd9a637;
+const COLOR_GRIPPER = 0xd16639;
+const COLOR_BASE_PLATE = 0xb7c0cc;
+const GRID_MAJOR = 0xb6bdc9;
+const GRID_MINOR = 0xd2d8e0;
 const COLOR_HANDLE = 0x88ddff;
 const COLOR_HANDLE_HOVER = 0xfff4a1;
 const COLOR_HANDLE_ERROR = 0xff6a6a;
@@ -61,7 +63,7 @@ if (!viewerEl) {
 
 function init(container) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0c11);
+  scene.background = new THREE.Color(SCENE_BG);
 
   // The arm in robot frame is built upright (+z up). We rotate the whole
   // rig so the robot-z axis aligns with world-y for three.js display.
@@ -69,17 +71,18 @@ function init(container) {
   rig.rotation.x = -Math.PI / 2;
   scene.add(rig);
 
-  // Soft lighting — one key light, one fill, plus a subtle ambient term.
-  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-  const key = new THREE.DirectionalLight(0xffffff, 0.9);
+  // Soft lighting tuned for a light background — strong ambient + a key
+  // light from above so the cylinders read as solid rather than washed out.
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const key = new THREE.DirectionalLight(0xffffff, 0.7);
   key.position.set(200, 400, 300);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0x88aaff, 0.4);
+  const fill = new THREE.DirectionalLight(0x88aaff, 0.25);
   fill.position.set(-300, 200, -200);
   scene.add(fill);
 
   // A faint floor grid for spatial reference. 50 mm cells, 10 cells wide.
-  const grid = new THREE.GridHelper(500, 10, 0x223044, 0x1a232f);
+  const grid = new THREE.GridHelper(500, 10, GRID_MAJOR, GRID_MINOR);
   grid.position.y = 0;
   scene.add(grid);
 
@@ -128,8 +131,22 @@ function init(container) {
   }
   requestAnimationFrame(animate);
 
-  // Independent poll loop — does not share state with app.js.
-  pollStatus();
+  // Subscribe to angle / torque events fired by app.js — both the
+  // optimistic ones (slider drag, pose POST response) and the periodic
+  // status poll. No separate /api/status poll inside the viewer; one
+  // network call per tick beats two.
+  document.addEventListener("buddy:angles", (ev) => {
+    applyAngles(ev.detail.angles);
+  });
+  document.addEventListener("buddy:torque", (ev) => {
+    setTorqueDim(ev.detail.enabled !== false);
+  });
+  // If app.js has already fetched a status by the time we mount, pick up
+  // its cached state immediately so we don't render a frame at zero.
+  if (window.BuddyState) {
+    applyAngles(window.BuddyState.positions);
+    setTorqueDim(window.BuddyState.torque_enabled !== false);
+  }
 }
 
 // --- Drag handle ----------------------------------------------------------
@@ -248,7 +265,16 @@ function setUpDragHandle({ scene, camera, renderer, controls,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!r.ok) flashError();
+      if (!r.ok) {
+        flashError();
+        return;
+      }
+      // Apply the IK angles optimistically so the arm snaps to the new
+      // pose without waiting for the next status poll.
+      const data = await r.json().catch(() => null);
+      if (data && data.angles && window.BuddyState) {
+        window.BuddyState.applyAngles(data.angles, { optimistic: true });
+      }
     } catch (_e) {
       flashError();
     }
@@ -385,18 +411,3 @@ function setTorqueDim(enabled) {
   }
 }
 
-async function pollStatus() {
-  try {
-    const r = await fetch("/api/status", { cache: "no-store" });
-    if (r.ok) {
-      const data = await r.json();
-      applyAngles(data.positions);
-      setTorqueDim(data.torque_enabled !== false);
-    }
-  } catch (_err) {
-    // Swallow errors — the next tick will retry. app.js owns the
-    // user-visible "offline" pill.
-  } finally {
-    setTimeout(pollStatus, POLL_MS);
-  }
-}

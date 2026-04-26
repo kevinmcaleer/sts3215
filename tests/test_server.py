@@ -156,12 +156,17 @@ def test_move_returns_400_for_invalid_pacing():
 # --- /api/pose ---
 
 
-def test_pose_reachable_target_drives_arm():
+def test_pose_reachable_target_drives_arm_and_returns_angles():
     server, bus, _ = _make_server()
     from kinematics import L1, L2, L3, L4, L5
     body = json.dumps({"x": 0, "y": 0, "z": L1 + L2 + L3 + L4 + L5}).encode()
-    status, _, _ = _call(server, "POST", "/api/pose", body)
+    status, _, resp = _call(server, "POST", "/api/pose", body)
     assert status == 200
+    payload = _json(resp)
+    assert payload["ok"] is True
+    # Response includes the IK angles so the UI can apply them optimistically.
+    assert set(payload["angles"].keys()) == {"base", "shoulder", "elbow",
+                                             "wrist_pitch", "wrist_roll"}
     # Five arm joints should have received move commands.
     assert len({m[0] for m in bus.moves}) == 5
 

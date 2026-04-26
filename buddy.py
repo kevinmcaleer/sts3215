@@ -169,3 +169,4 @@ class Buddy:
             max_speed = 600
         self.move_all_sync(targets, duration_ms=duration_ms,
                            max_speed=max_speed, acc=acc, wait=wait)
+        return targets
