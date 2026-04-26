@@ -111,3 +111,34 @@ input[type=range] {
   max-height: 220px;
   overflow: auto;
 }
+
+#cli-input {
+  width: 100%;
+  background: #0b0d12;
+  color: #e6e8eb;
+  border: 1px solid #2a2f3d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+#cli-input:focus {
+  outline: none;
+  border-color: #4d6ea3;
+}
+
+#cli-log {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #9aa3b2;
+  white-space: pre-wrap;
+  height: 220px;
+  overflow: auto;
+  background: #0b0d12;
+  border: 1px solid #232730;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
