@@ -71,10 +71,10 @@ class STS3215:
 
         if self.dir_pin:
             self.dir_pin.value(0)  # RX mode
-
-        # Discard the TX echo that half-duplex wiring loops back onto RX.
-        # On boards that don't echo, this is a harmless no-op.
-        self.uart.read()
+            # Half-duplex wiring loops TX back onto RX; discard that echo.
+            # On full-duplex wiring (no dir_pin) there is no echo, and reading
+            # here would swallow a fast servo reply that has already arrived.
+            self.uart.read()
 
     def _receive(self, servo_id):
         """Read a response packet from a servo, verifying its framing."""
