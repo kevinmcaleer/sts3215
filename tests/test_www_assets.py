@@ -33,6 +33,7 @@ def _server():
     ("/",         b"<title>Buddy",       "text/html"),
     ("/style.css", b".joint",            "text/css"),
     ("/app.js",   b"/api/status",        "application/javascript"),
+    ("/cli.js",   b"/api/status",        "application/javascript"),
 ])
 def test_static_bundle_is_reachable(path, marker, content_type):
     status, headers, body = _server().handle_request("GET", path, {}, b"")
@@ -47,3 +48,17 @@ def test_app_js_references_each_arm_endpoint():
     for endpoint in (b"/api/status", b"/api/joint/", b"/api/torque",
                      b"/api/gripper"):
         assert endpoint in body, "app.js missing " + endpoint.decode()
+
+
+def test_cli_js_references_each_endpoint_it_drives():
+    with open(os.path.join(WWW_DIR, "cli.js"), "rb") as f:
+        body = f.read()
+    for endpoint in (b"/api/status", b"/api/joint/", b"/api/torque",
+                     b"/api/gripper", b"/api/pose", b"/api/move"):
+        assert endpoint in body, "cli.js missing " + endpoint.decode()
+
+
+def test_index_html_loads_cli_js():
+    with open(os.path.join(WWW_DIR, "index.html"), "rb") as f:
+        body = f.read()
+    assert b"cli.js" in body, "index.html does not reference cli.js"
