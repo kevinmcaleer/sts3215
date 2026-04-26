@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Buddy</title>
   <link rel="stylesheet" href="/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three":          "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/":  "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body>
   <header>
@@ -13,6 +21,13 @@
   </header>
 
   <main>
+    <section class="card full">
+      <div class="card-head">
+        <h2>3D Viewer</h2>
+      </div>
+      <div id="viewer"></div>
+    </section>
+
     <section class="card">
       <div class="card-head">
         <h2>Joints</h2>
@@ -39,6 +54,7 @@
     </section>
   </main>
 
+  <script type="module" src="/viewer.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
