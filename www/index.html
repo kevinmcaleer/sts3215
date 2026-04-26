@@ -46,6 +46,28 @@
       </div>
     </section>
 
+    <section class="card full">
+      <div class="card-head">
+        <h2>Pose target</h2>
+        <span id="pose-status" class="pill">—</span>
+      </div>
+      <div class="pose-grid">
+        <label>x (mm)<input id="pose-x" type="number" step="1" value="0"></label>
+        <label>y (mm)<input id="pose-y" type="number" step="1" value="0"></label>
+        <label>z (mm)<input id="pose-z" type="number" step="1" value="390"></label>
+        <label>roll<input  id="pose-roll"  type="number" step="1" value="0"></label>
+        <label>pitch<input id="pose-pitch" type="number" step="1" value="0"></label>
+        <label>yaw<input   id="pose-yaw"   type="number" step="1" placeholder="auto"></label>
+      </div>
+      <div class="pose-row">
+        <label class="cb"><input type="checkbox" id="pose-elbow-up"> elbow up</label>
+        <label>duration (ms)<input id="pose-duration" type="number" step="50" value="1500"></label>
+        <button id="pose-preview" class="btn">Preview</button>
+        <button id="pose-go" class="btn primary">Go</button>
+      </div>
+      <pre id="pose-preview-out">—</pre>
+    </section>
+
     <section class="card">
       <div class="card-head">
         <h2>Status</h2>
@@ -67,5 +89,6 @@
   <script type="module" src="/viewer.js"></script>
   <script src="/app.js"></script>
   <script src="/cli.js"></script>
+  <script src="/pose.js"></script>
 </body>
 </html>

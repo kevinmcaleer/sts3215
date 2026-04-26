@@ -35,6 +35,7 @@ def _server():
     ("/app.js",    b"/api/status",  "application/javascript"),
     ("/viewer.js", b"three",        "application/javascript"),
     ("/cli.js",    b"/api/status",  "application/javascript"),
+    ("/pose.js",   b"/api/ik",      "application/javascript"),
 ])
 def test_static_bundle_is_reachable(path, marker, content_type):
     status, headers, body = _server().handle_request("GET", path, {}, b"")
@@ -73,3 +74,20 @@ def test_index_html_loads_cli_js():
     with open(os.path.join(WWW_DIR, "index.html"), "rb") as f:
         body = f.read()
     assert b"cli.js" in body, "index.html does not reference cli.js"
+
+
+def test_pose_js_references_ik_and_pose_endpoints():
+    with open(os.path.join(WWW_DIR, "pose.js"), "rb") as f:
+        body = f.read()
+    assert b"/api/ik" in body, "pose.js missing /api/ik"
+    assert b"/api/pose" in body, "pose.js missing /api/pose"
+
+
+def test_index_html_wires_in_pose_card_and_script():
+    with open(os.path.join(WWW_DIR, "index.html"), "rb") as f:
+        body = f.read()
+    assert b"pose.js" in body, "index.html does not reference pose.js"
+    for el_id in (b"pose-x", b"pose-y", b"pose-z",
+                  b"pose-preview", b"pose-go"):
+        assert b'id="' + el_id + b'"' in body, \
+            "index.html missing element #" + el_id.decode()
