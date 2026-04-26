@@ -52,6 +52,15 @@ const HANDLE_GRACE_MS = 250;     // keep gizmo open this long after mouse leaves
 const pivots = {};
 // Materials we tint when torque is disabled.
 const linkMaterials = [];
+// Gripper-finger meshes whose x position we slide based on the live
+// gripper-joint angle: [left, right]. Populated by buildArm.
+const gripperFingers = [];
+
+// Visual gripper travel: degrees → finger spacing in mm.
+// Beyond GRIPPER_OPEN_DEG the fingers stay at the open spacing.
+const GRIPPER_OPEN_DEG = 90;
+const GRIPPER_HALF_CLOSED = 5;   // finger half-spacing when fully closed
+const GRIPPER_HALF_OPEN = 22;    // finger half-spacing when fully open
 
 const viewerEl = document.getElementById("viewer");
 if (!viewerEl) {
@@ -343,20 +352,56 @@ function buildArm(rigRoot) {
   attachJointKnuckle(wristRoll);
   attachLinkAlongZ(wristRoll, L5, "tool");
 
-  // Gripper sits at the tip. Pivot exists so we can hint at "open" later;
-  // for now we just visualise it as a small box at the end-effector.
+  // Parallel-jaw gripper. The gripper pivot sits at the kinematic tip
+  // (L5 from wrist_roll). A flat mount plate is anchored just past the
+  // tip; two finger rails extend forward in +z (the approach direction)
+  // and slide apart along x as the gripper joint opens.
   const gripper = new THREE.Object3D();
   gripper.position.z = L5;
   wristRoll.add(gripper);
   pivots.gripper = gripper;
-  const gripGeom = new THREE.BoxGeometry(36, 18, 22);
-  const gripMat = new THREE.MeshStandardMaterial({
+
+  const mountGeom = new THREE.BoxGeometry(56, 30, 8);
+  const mountMat = new THREE.MeshStandardMaterial({
     color: COLOR_GRIPPER, roughness: 0.45,
   });
-  const gripMesh = new THREE.Mesh(gripGeom, gripMat);
-  // Box is symmetric around its origin — no offset needed.
-  gripper.add(gripMesh);
-  linkMaterials.push(gripMat);
+  const mount = new THREE.Mesh(mountGeom, mountMat);
+  mount.position.z = 4;             // sits just past the tip plane
+  gripper.add(mount);
+  linkMaterials.push(mountMat);
+
+  const fingerGeom = new THREE.BoxGeometry(8, 22, 50);
+  const fingerMat = new THREE.MeshStandardMaterial({
+    color: COLOR_GRIPPER, roughness: 0.5,
+  });
+
+  function makeFinger(side) {
+    const f = new THREE.Mesh(fingerGeom, fingerMat);
+    f.position.z = 33;              // mount front (z=8) + finger half (25)
+    f.position.x = side * GRIPPER_HALF_CLOSED;
+    gripper.add(f);
+    return f;
+  }
+
+  // Inner pad on each finger — the contact surface, slightly inset on x
+  // so it reads as a soft gripping face rather than a flat side wall.
+  const padGeom = new THREE.BoxGeometry(2, 18, 38);
+  const padMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2f3d, roughness: 0.7,
+  });
+  function attachPad(finger, side) {
+    const p = new THREE.Mesh(padGeom, padMat);
+    p.position.x = -side * 5;       // inset toward the centre line
+    p.position.z = -2;              // tucked back from the finger tip
+    finger.add(p);
+  }
+
+  const fingerL = makeFinger(-1);
+  const fingerR = makeFinger(+1);
+  attachPad(fingerL, -1);
+  attachPad(fingerR, +1);
+  gripperFingers.push(fingerL, fingerR);
+  linkMaterials.push(fingerMat, padMat);
 }
 
 // Place a cylinder of length `length` starting at the local origin,
@@ -392,7 +437,19 @@ function applyAngles(positions) {
   setRot(pivots.elbow,       "y", positions.elbow);
   setRot(pivots.wrist_pitch, "y", positions.wrist_pitch);
   setRot(pivots.wrist_roll,  "z", positions.wrist_roll);
-  // gripper position isn't part of the kinematic chain.
+  // Gripper isn't part of the kinematic chain — it slides the finger
+  // rails apart instead of rotating.
+  if (positions.gripper !== undefined) applyGripper(positions.gripper);
+}
+
+function applyGripper(degrees) {
+  const v = Number(degrees);
+  if (!Number.isFinite(v)) return;
+  const t = Math.min(Math.max(v / GRIPPER_OPEN_DEG, 0), 1);
+  const half = GRIPPER_HALF_CLOSED
+             + (GRIPPER_HALF_OPEN - GRIPPER_HALF_CLOSED) * t;
+  if (gripperFingers[0]) gripperFingers[0].position.x = -half;
+  if (gripperFingers[1]) gripperFingers[1].position.x = +half;
 }
 
 function setRot(pivot, axis, degrees) {
