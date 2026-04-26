@@ -24,6 +24,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { setupViewCube } from "/viewcube.js";
 
 // Link lengths in millimetres. MUST stay in sync with kinematics.py.
 const L1 = 60.0;   // base column
@@ -132,10 +133,23 @@ function init(container) {
     getTipWorldPosition: (out) => pivots.gripper.getWorldPosition(out),
   });
 
+  // View cube + home button overlay. Captures the current camera position
+  // and target as the "home" view so the home button can restore them.
+  const viewCube = setupViewCube({
+    mountEl: container,
+    mainCamera: camera,
+    mainControls: controls,
+    homeView: {
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target:   [controls.target.x,  controls.target.y,  controls.target.z],
+    },
+  });
+
   function animate() {
     controls.update();
     handleState.tick();
     renderer.render(scene, camera);
+    viewCube.tick();
     requestAnimationFrame(animate);
   }
   requestAnimationFrame(animate);

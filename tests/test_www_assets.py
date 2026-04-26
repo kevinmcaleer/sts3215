@@ -36,6 +36,7 @@ def _server():
     ("/viewer.js", b"three",        "application/javascript"),
     ("/cli.js",    b"/api/status",  "application/javascript"),
     ("/pose.js",   b"/api/ik",      "application/javascript"),
+    ("/viewcube.js", b"FACE_LABELS", "application/javascript"),
 ])
 def test_static_bundle_is_reachable(path, marker, content_type):
     status, headers, body = _server().handle_request("GET", path, {}, b"")
@@ -71,6 +72,23 @@ def test_viewer_js_wires_drag_handle():
         "viewer.js missing /api/pose POST for drag-end submission"
     assert b"dragging-changed" in body, \
         "viewer.js missing TransformControls dragging event listener"
+
+
+def test_viewer_js_wires_in_viewcube():
+    with open(os.path.join(WWW_DIR, "viewer.js"), "rb") as f:
+        body = f.read()
+    assert b"setupViewCube" in body, \
+        "viewer.js missing setupViewCube import"
+    assert b"viewcube.js" in body, \
+        "viewer.js missing /viewcube.js module path"
+
+
+def test_viewcube_js_labels_all_six_faces():
+    with open(os.path.join(WWW_DIR, "viewcube.js"), "rb") as f:
+        body = f.read()
+    for label in (b"front", b"rear", b"top", b"bottom", b"left", b"right"):
+        assert label in body, "viewcube.js missing label '{}'".format(
+            label.decode())
 
 
 def test_cli_js_references_each_endpoint_it_drives():
