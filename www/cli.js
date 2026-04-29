@@ -8,7 +8,7 @@
 //   torque on|off                    → POST /api/torque
 //   gripper open|close|<percent>     → POST /api/gripper (percent unsupported)
 //   status                           → GET  /api/status   (pretty-printed)
-//   home                             → POST /api/move (zeroes the major joints)
+//   home                             → POST /api/home (parks every joint at 0°)
 //
 // History: in-memory only (no localStorage). Tab completes joint names from
 // the list cached by the most recent /api/status response.
@@ -126,14 +126,12 @@
   }
 
   async function cmdHome() {
-    // Compose a multi-joint move using the existing /api/move endpoint —
-    // no new server route needed. Joint names match buddy.DEFAULT_JOINTS.
-    const payload = {
-      joints: { base: 0, shoulder: 0, elbow: 0,
-                wrist_pitch: 0, wrist_roll: 0 },
-      duration_ms: 1500,
-    };
-    const res = await jsonPost("/api/move", payload);
+    // /api/home introspects the live joint config on the server, so this
+    // works for custom joint sets too.
+    const res = await jsonPost("/api/home", { duration_ms: 1500 });
+    if (res && res.angles && window.BuddyState) {
+      window.BuddyState.applyAngles(res.angles, { optimistic: true });
+    }
     logLine("ok: " + JSON.stringify(res));
   }
 

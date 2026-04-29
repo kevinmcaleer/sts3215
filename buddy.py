@@ -142,6 +142,27 @@ class Buddy:
         joint = self._joint("gripper")
         self.move_joint("gripper", joint["min_deg"], speed=speed, acc=acc)
 
+    def home(self, duration_ms=1500, max_speed=None, acc=50, wait=False,
+             include_gripper=False):
+        """Drive every kinematic joint to its 0° user-frame position.
+
+        Useful at boot to park the arm at a known reference pose. The
+        STS3215's encoder is absolute, so position is already known on
+        power-up — this simply commits to a defined starting posture
+        rather than picking up wherever the arm was last left.
+
+        By default the gripper is left alone; pass include_gripper=True
+        to fold it in (it'll move to 0° too, which closes the jaws on
+        a default config).
+        """
+        targets = {name: 0.0 for name in self.joints
+                   if include_gripper or name != "gripper"}
+        if duration_ms is None and max_speed is None:
+            duration_ms = 1500
+        self.move_all_sync(targets, duration_ms=duration_ms,
+                           max_speed=max_speed, acc=acc, wait=wait)
+        return targets
+
     def move_to_pose(self, x, y, z, roll=0.0, pitch=0.0, yaw=None,
                      duration_ms=None, max_speed=None, acc=50,
                      wait=False, elbow_up=False):

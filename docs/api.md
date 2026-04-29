@@ -98,6 +98,21 @@ Same field meanings as `/api/pose`. Reachable: `200` with
 { "enable": true }
 ```
 
+### `POST /api/home`
+
+Drive every kinematic joint back to its 0° user-frame position via
+`Buddy.home`. Useful for parking the arm at a known reference pose
+after boot or to reset between routines.
+
+```json
+{ "duration_ms": 1500, "include_gripper": false }
+```
+
+Both fields are optional. Returns `{ "ok": true, "angles": {...} }`
+on success — the angles dict echoes the targets the server sent so
+callers can apply them optimistically. Returns `501` if the running
+build of `Buddy` lacks `home`.
+
 Echoes the new `torque_enabled` state in the response.
 
 ### `POST /api/wifi`

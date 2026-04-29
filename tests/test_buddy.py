@@ -343,3 +343,51 @@ def test_move_to_pose_yaw_default_uses_atan2():
     # enough — confirm a base move was emitted.
     base_id = DEFAULT_JOINTS["base"]["id"]
     assert any(m[0] == base_id for m in bus.moves)
+
+
+# --- home -----------------------------------------------------------------
+
+
+def test_home_targets_every_arm_joint_but_skips_gripper_by_default():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    targets = b.home(duration_ms=1000)
+    arm_ids = sorted(j["id"] for n, j in DEFAULT_JOINTS.items() if n != "gripper")
+    moved_ids = sorted({m[0] for m in bus.moves})
+    assert moved_ids == arm_ids
+    assert "gripper" not in targets
+    assert all(v == 0.0 for v in targets.values())
+
+
+def test_home_includes_gripper_when_requested():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    targets = b.home(duration_ms=1000, include_gripper=True)
+    assert "gripper" in targets
+    moved_ids = {m[0] for m in bus.moves}
+    assert DEFAULT_JOINTS["gripper"]["id"] in moved_ids
+
+
+def test_home_default_duration_is_1500_ms():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    bus.positions[DEFAULT_JOINTS["elbow"]["id"]] = degrees_to_position(180)
+    b = Buddy(bus)
+    b.home()
+    speeds = {m[0]: m[2] for m in bus.moves}
+    elbow_speed = speeds[DEFAULT_JOINTS["elbow"]["id"]]
+    # 180° ≈ 2047 raw steps over 1.5 s → ~1365 steps/s. Generous bounds.
+    assert 1000 < elbow_speed < 1700
+
+
+def test_home_respects_custom_joint_config():
+    bus = FakeBus()
+    custom = {"only": {"id": 9, "min_deg": 0, "max_deg": 360,
+                       "offset_deg": 0, "sign": 1}}
+    bus.positions[9] = degrees_to_position(45)
+    b = Buddy(bus, joints=custom)
+    targets = b.home(duration_ms=500)
+    assert targets == {"only": 0.0}
+    assert any(m[0] == 9 for m in bus.moves)

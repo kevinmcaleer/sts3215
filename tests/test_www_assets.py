@@ -49,8 +49,20 @@ def test_app_js_references_each_arm_endpoint():
     with open(os.path.join(WWW_DIR, "app.js"), "rb") as f:
         body = f.read()
     for endpoint in (b"/api/status", b"/api/joint/", b"/api/torque",
-                     b"/api/gripper"):
+                     b"/api/gripper", b"/api/home"):
         assert endpoint in body, "app.js missing " + endpoint.decode()
+
+
+def test_index_html_has_home_arm_button():
+    with open(os.path.join(WWW_DIR, "index.html"), "rb") as f:
+        body = f.read()
+    assert b'id="home-arm"' in body, "index.html missing #home-arm button"
+
+
+def test_cli_js_home_command_uses_api_home():
+    with open(os.path.join(WWW_DIR, "cli.js"), "rb") as f:
+        body = f.read()
+    assert b"/api/home" in body, "cli.js home command should hit /api/home"
 
 
 def test_index_html_wires_in_viewer():
@@ -95,7 +107,7 @@ def test_cli_js_references_each_endpoint_it_drives():
     with open(os.path.join(WWW_DIR, "cli.js"), "rb") as f:
         body = f.read()
     for endpoint in (b"/api/status", b"/api/joint/", b"/api/torque",
-                     b"/api/gripper", b"/api/pose", b"/api/move"):
+                     b"/api/gripper", b"/api/pose", b"/api/home"):
         assert endpoint in body, "cli.js missing " + endpoint.decode()
 
 

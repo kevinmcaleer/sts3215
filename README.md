@@ -100,6 +100,11 @@ buddy  = Buddy(bus, config_path="/config.json")
 net    = boot_network()
 print("network:", net)
 
+# STS3215 encoders are absolute, so `read_all_positions()` is already correct
+# on first boot. Park the arm at a known reference pose anyway:
+buddy.set_torque_all(True)
+buddy.home(duration_ms=1500)
+
 Server(buddy).serve_forever(host="0.0.0.0", port=80)
 ```
 

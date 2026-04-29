@@ -291,6 +291,55 @@ def test_torque_missing_enable_returns_400():
     assert status == 400
 
 
+# --- /api/home ---
+
+
+def test_home_drives_arm_joints_and_returns_angles():
+    server, bus, _ = _make_server()
+    status, _, resp = _call(server, "POST", "/api/home",
+                            json.dumps({"duration_ms": 800}).encode())
+    assert status == 200
+    payload = _json(resp)
+    assert payload["ok"] is True
+    # Five arm joints (no gripper) returned at 0°.
+    assert set(payload["angles"].keys()) == {"base", "shoulder", "elbow",
+                                              "wrist_pitch", "wrist_roll"}
+    assert all(v == 0.0 for v in payload["angles"].values())
+    # And five distinct moves were emitted on the bus.
+    assert len({m[0] for m in bus.moves}) == 5
+
+
+def test_home_with_include_gripper_targets_six_joints():
+    server, bus, _ = _make_server()
+    body = json.dumps({"include_gripper": True}).encode()
+    status, _, resp = _call(server, "POST", "/api/home", body)
+    assert status == 200
+    angles = _json(resp)["angles"]
+    assert "gripper" in angles
+    assert len({m[0] for m in bus.moves}) == 6
+
+
+def test_home_returns_501_when_buddy_lacks_home():
+    class BareBuddy:
+        joints = DEFAULT_JOINTS
+        bus = FakeBus()
+        torque_enabled = None
+        def read_all_positions(self): return {n: 0.0 for n in DEFAULT_JOINTS}
+
+    server = Server(BareBuddy())
+    status, _, resp = _call(server, "POST", "/api/home", b"{}")
+    assert status == 501
+    assert "buddy.home" in _json(resp)["error"]
+
+
+def test_home_with_empty_body_uses_defaults():
+    server, bus, _ = _make_server()
+    status, _, resp = _call(server, "POST", "/api/home", b"")
+    assert status == 200
+    # No body → no include_gripper → 5 joints.
+    assert len({m[0] for m in bus.moves}) == 5
+
+
 # --- /api/wifi (provisioning) ---
 
 

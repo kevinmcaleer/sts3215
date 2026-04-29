@@ -7,6 +7,7 @@ const els = {
   log:       document.getElementById("status-log"),
   conn:      document.getElementById("connection"),
   torque:    document.getElementById("torque"),
+  homeArm:   document.getElementById("home-arm"),
   gripOpen:  document.getElementById("grip-open"),
   gripClose: document.getElementById("grip-close"),
 };
@@ -200,6 +201,26 @@ els.torque.addEventListener("click", async () => {
     setTorqueButton(next);
   } catch (err) {
     log("torque toggle failed: " + err.message);
+  }
+});
+
+els.homeArm.addEventListener("click", async () => {
+  els.homeArm.disabled = true;
+  try {
+    const result = await api("/api/home", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duration_ms: 1500 }),
+    });
+    // Apply the target angles immediately so sliders + 3D view jump to
+    // the home pose without waiting for the next status poll.
+    if (result && result.angles) {
+      window.BuddyState.applyAngles(result.angles, { optimistic: true });
+    }
+  } catch (err) {
+    log("home failed: " + err.message);
+  } finally {
+    els.homeArm.disabled = false;
   }
 });
 
