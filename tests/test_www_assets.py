@@ -66,7 +66,7 @@ def test_cli_js_references_each_endpoint_it_drives():
     with open(os.path.join(WWW_DIR, "cli.js"), "rb") as f:
         body = f.read()
     for endpoint in (b"/api/status", b"/api/joint/", b"/api/torque",
-                     b"/api/gripper", b"/api/pose", b"/api/move"):
+                     b"/api/gripper", b"/api/pose", b"/api/home"):
         assert endpoint in body, "cli.js missing " + endpoint.decode()
 
 

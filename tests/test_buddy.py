@@ -300,13 +300,94 @@ def test_move_all_sync_wait_respects_timeout(monkeypatch):
                     wait=True, poll_interval_ms=0, timeout_ms=50)
 
 
-# --- move_to_pose ---------------------------------------------------------
+# --- home -----------------------------------------------------------------
 
 
 def _seed_default_positions(bus):
     """Seed read_position for every default-joint id so move_all_sync can run."""
     for j in DEFAULT_JOINTS.values():
         bus.positions[j["id"]] = degrees_to_position(0)
+
+
+def test_home_moves_all_arm_joints_to_zero():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    targets = b.home()
+    # Five arm joints, gripper excluded.
+    assert set(targets.keys()) == {"base", "shoulder", "elbow",
+                                    "wrist_pitch", "wrist_roll"}
+    assert all(v == 0.0 for v in targets.values())
+    # All five arm joints should have received move commands.
+    arm_ids = {j["id"] for n, j in DEFAULT_JOINTS.items() if n != "gripper"}
+    moved = {m[0] for m in bus.moves}
+    assert arm_ids == moved
+
+
+def test_home_with_include_gripper():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    targets = b.home(include_gripper=True)
+    assert "gripper" in targets
+    assert targets["gripper"] == 0.0
+    gripper_id = DEFAULT_JOINTS["gripper"]["id"]
+    assert any(m[0] == gripper_id for m in bus.moves)
+
+
+def test_home_excludes_gripper_by_default():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    targets = b.home()
+    assert "gripper" not in targets
+    gripper_id = DEFAULT_JOINTS["gripper"]["id"]
+    assert not any(m[0] == gripper_id for m in bus.moves)
+
+
+def test_home_returns_targets():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    result = b.home()
+    assert isinstance(result, dict)
+    for v in result.values():
+        assert v == 0.0
+
+
+def test_home_uses_default_duration_when_none_given():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    # No ValueError means it picked a valid pacing internally.
+    b.home(duration_ms=None, max_speed=None)
+    assert len(bus.moves) > 0
+
+
+def test_home_with_max_speed():
+    bus = FakeBus()
+    _seed_default_positions(bus)
+    b = Buddy(bus)
+    b.home(max_speed=300)
+    # All speeds should be <= 300.
+    assert all(speed <= 300 for _, _, speed, _ in bus.moves)
+
+
+def test_home_with_custom_joints():
+    bus = FakeBus()
+    custom = {
+        "a": {"id": 1, "min_deg": 0, "max_deg": 360, "offset_deg": 0, "sign": 1},
+        "b": {"id": 2, "min_deg": 0, "max_deg": 360, "offset_deg": 0, "sign": 1},
+    }
+    bus.positions[1] = degrees_to_position(90)
+    bus.positions[2] = degrees_to_position(45)
+    b = Buddy(bus, joints=custom)
+    targets = b.home()
+    assert targets == {"a": 0.0, "b": 0.0}
+    assert len(bus.moves) == 2
+
+
+# --- move_to_pose ---------------------------------------------------------
 
 
 def test_move_to_pose_sends_moves_for_arm_joints_only():
