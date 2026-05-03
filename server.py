@@ -133,6 +133,8 @@ class Server:
             return self._gripper(data)
         if path == "/api/torque" and method == "POST":
             return self._torque(data)
+        if path == "/api/home" and method == "POST":
+            return self._home(data)
         if path == "/api/wifi" and method == "POST":
             return self._wifi(data)
         if path.startswith("/api/joint/") and method == "POST":
@@ -254,6 +256,20 @@ class Server:
         self.buddy.set_torque_all(bool(data["enable"]))
         return _json_response({"ok": True, "torque_enabled":
                                self.buddy.torque_enabled})
+
+    def _home(self, data):
+        if not hasattr(self.buddy, "home"):
+            raise HttpError(501, "buddy.home not available")
+        duration_ms = data.get("duration_ms")
+        max_speed = data.get("max_speed")
+        include_gripper = bool(data.get("include_gripper", False))
+        try:
+            angles = self.buddy.home(duration_ms=duration_ms,
+                                     max_speed=max_speed,
+                                     include_gripper=include_gripper)
+        except ValueError as e:
+            raise HttpError(400, str(e))
+        return _json_response({"ok": True, "angles": angles or {}})
 
     def _wifi(self, data):
         ssid = (data.get("ssid") or "").strip()
